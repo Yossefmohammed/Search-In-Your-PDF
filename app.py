@@ -10,15 +10,23 @@ from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
 def load_llm():
     import torch
 
+    # Local model path
     checkpoint = r"C:\Users\youssef\Desktop\search_PDF\LaMini-T5-738M"
+    
     tokenizer = AutoTokenizer.from_pretrained(checkpoint)
-    model = AutoModelForSeq2SeqLM.from_pretrained(checkpoint).to("cuda" if torch.cuda.is_available() else "cpu")
+    model = AutoModelForSeq2SeqLM.from_pretrained(
+        checkpoint,
+        device_map='cpu',
+        torch_dtype=torch.float32
+    )
 
+    # LaMini-T5 max token limit = 512
     gen_pipeline = pipeline(
         "text2text-generation",
         model=model,
         tokenizer=tokenizer,
-        max_length=512,  # keep max_length <= 512 for T5
+        max_length=512,
+        truncation=True,  # <-- Important to avoid token overflow
         do_sample=True,
         temperature=0.3,
         top_p=0.95,
@@ -26,16 +34,12 @@ def load_llm():
 
     return HuggingFacePipeline(pipeline=gen_pipeline)
 
-    return HuggingFacePipeline(pipeline=gen_pipeline)
-
 @st.cache_resource()
 def load_qa():
     llm = load_llm()
 
-    # Use the same embeddings as ingestion or compatible ones
     embeddings = SentenceTransformerEmbeddings(model_name="all-miniLM-L6-v2")
 
-    # Load persistent vectorstore from disk using persist_directory (no client!)
     db = Chroma(
         embedding_function=embeddings,
         persist_directory=CHROMA_SETTINGS.persist_directory
@@ -50,32 +54,31 @@ def load_qa():
         return_source_documents=True,
     )
     return qa_chain
-def process_answer(Instruction):
-    response=''
-    Instruction=Instruction
-    qa=load_qa()
-    generated_text = qa(Instruction)
+
+def process_answer(instruction):
+    qa = load_qa()
+    generated_text = qa(instruction)
     answer = generated_text['result']
-    return answer ,generated_text
+    return answer, generated_text
 
 def main():
     st.title("🔍 Search Your PDF")
+    
     with st.expander("About the App"):
-        st.markdown("""THis is a Generative Ai Powereds Question and Answering app that responds to questions about
-                    your pdf files.""")
+        st.markdown("""This is a Generative AI-powered question-and-answering app that responds to questions about your PDF files.""")
 
     question = st.text_area("Enter Your Question")
 
     if st.button("Search"):
-        st.info("Your question : "+question)
-        st.info("Your Answer")
         if question.strip() == "":
             st.warning("Please enter a question before searching.")
         else:
-            answer,metadata = process_answer(question)
+            st.info("Your question: " + question)
+            answer, metadata = process_answer(question)
+            st.subheader("Answer:")
             st.write(answer)
+            st.subheader("Metadata:")
             st.write(metadata)
-
 
 if __name__ == "__main__":
     main()
